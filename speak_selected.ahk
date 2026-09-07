@@ -4,14 +4,15 @@ Persistent
 
 ; ==============================================================================
 ; Piper TTS - Озвучивание выделенного текста по горячим клавишам для Windows
-; Горячая клавиша: Ctrl + Shift + Space  (Старт / Стоп)
-; Экстренный стоп: Ctrl + Shift + Esc    или клавиша Pause
+; Горячая клавиша по умолчанию: Ctrl + Shift + Space (Старт / Стоп)
+; Экстренный стоп:              Ctrl + Shift + Esc   или клавиша Pause
 ; ==============================================================================
 
 appDir := A_ScriptDir
 piperExe := appDir "\piper\piper.exe"
 modelsDir := appDir "\models"
 tempDir := A_Temp "\piper_tts"
+configFile := appDir "\config.ini"
 
 if !DirExist(tempDir)
     DirCreate(tempDir)
@@ -19,9 +20,12 @@ if !DirExist(tempDir)
 tempTxt := tempDir "\input.txt"
 tempWav := tempDir "\output.wav"
 
-; Настройки по умолчанию
-global currentSpeed := 1.0
-global currentModel := "ru_RU-dmitri-medium.onnx"
+; ------------------------------------------------------------------------------
+; Чтение сохраненных настроек из config.ini
+; ------------------------------------------------------------------------------
+global currentHotkey := IniRead(configFile, "Settings", "Hotkey", "^+Space")
+global currentModel  := IniRead(configFile, "Settings", "Model", "ru_RU-dmitri-medium.onnx")
+global currentSpeed  := Float(IniRead(configFile, "Settings", "Speed", "1.0"))
 
 ; Список найденных моделей
 global availableModels := []
@@ -35,6 +39,7 @@ global speedOptions := [
 
 global voiceMenu := Menu()
 global speedMenu := Menu()
+global hotkeyGuiObj := ""
 
 loop files modelsDir "\*.onnx" {
     availableModels.Push(A_LoopFileName)
@@ -48,8 +53,10 @@ if (availableModels.Length > 0) {
             break
         }
     }
-    if (!hasDefault)
+    if (!hasDefault) {
         currentModel := availableModels[1]
+        IniWrite(currentModel, configFile, "Settings", "Model")
+    }
 } else {
     res := MsgBox("В папке models не найдено ни одной модели голоса.`n`nЗапустить загрузку голосов (download_voice.ps1)?", "Piper TTS", "YesNo Icon?")
     if (res = "Yes") {
@@ -57,10 +64,11 @@ if (availableModels.Length > 0) {
     }
 }
 
-; Инициализация меню в трее
-InitTrayMenu()
+; ------------------------------------------------------------------------------
+; Регистрация горячих клавиш
+; ------------------------------------------------------------------------------
 
-; Предотвращаем срабатывание переключения раскладки клавиатуры (Ctrl+Shift) в Windows
+; Маскирование переключения языка Windows при нажатии Ctrl+Shift
 A_MenuMaskKey := "vkE8"
 
 MaskLayoutSwitch() {
@@ -68,23 +76,56 @@ MaskLayoutSwitch() {
     DllCall("keybd_event", "uchar", 0xE8, "uchar", 0, "uint", 2, "uptr", 0)
 }
 
+; Функция применения горячей клавиши
+ApplyHotkey(newHk) {
+    global currentHotkey, configFile
+    
+    ; Снимаем старую комбинацию
+    if (currentHotkey != "") {
+        try Hotkey(currentHotkey, "Off")
+    }
+
+    try {
+        Hotkey(newHk, OnHotkeyPressed, "On")
+        currentHotkey := newHk
+        IniWrite(currentHotkey, configFile, "Settings", "Hotkey")
+        UpdateTrayMenuAndTip()
+        return true
+    } catch as err {
+        ; Если регистрация не удалась, возвращаем старую
+        if (currentHotkey != "")
+            try Hotkey(currentHotkey, OnHotkeyPressed, "On")
+        throw err
+    }
+}
+
+; Регистрируем основную горячую клавишу
+try {
+    ApplyHotkey(currentHotkey)
+} catch {
+    ; Если сохраненная клавиша недопустима, сбрасываем на дефолтную
+    ApplyHotkey("^+Space")
+}
+
+; Экстренные клавиши остановки (всегда активны)
+^+Esc::StopPlayback()
+Pause::StopPlayback()
+
 ; ------------------------------------------------------------------------------
-; Горячая клавиша: Ctrl + Shift + Space (Старт / Стоп)
+; Обработчик нажатия горячей клавиши (Старт / Стоп)
 ; ------------------------------------------------------------------------------
 
-^+Space::
-{
-    ; Сбрасываем триггер смены языка Windows
+OnHotkeyPressed(hk) {
     MaskLayoutSwitch()
 
-    ; Если в данный момент уже воспроизводится звук — останавливаем его и выходим
+    ; Если в данный момент воспроизводится звук — останавливаем его (Toggle)
     if IsAudioPlaying() {
         StopPlayback()
         ShowTempTooltip("⏹ Воспроизведение остановлено", 1000)
         return
     }
 
-    ; Сохраняем предыдущее содержимое буфера обмена пользователя
+    ; Сохраняем предыдущий буфер обмена пользователя
     clipBackup := ClipboardAll()
     A_Clipboard := ""
 
@@ -115,10 +156,6 @@ MaskLayoutSwitch() {
     SpeakText(selectedText)
 }
 
-; Экстренная остановка
-^+Esc::StopPlayback()
-Pause::StopPlayback()
-
 ; ------------------------------------------------------------------------------
 ; Функции синтеза и воспроизведения звука (MCI)
 ; ------------------------------------------------------------------------------
@@ -144,7 +181,7 @@ PlayWav(wavPath) {
 }
 
 SpeakText(text) {
-    global piperExe, modelsDir, currentModel, currentSpeed, tempTxt, tempWav
+    global piperExe, modelsDir, currentModel, currentSpeed, tempTxt, tempWav, currentHotkey
 
     modelPath := modelsDir "\" currentModel
     configPath := modelPath ".json"
@@ -194,12 +231,28 @@ SpeakText(text) {
 
     ; Запуск воспроизведения через MCI
     PlayWav(tempWav)
-    ShowTempTooltip("🔊 Озвучивание... (Ctrl+Shift+Space — стоп)", 3000)
+    readableHk := GetReadableHotkey(currentHotkey)
+    ShowTempTooltip("🔊 Озвучивание... (" readableHk " — стоп)", 3000)
 }
 
 ShowTempTooltip(msg, durationMs := 1500) {
     ToolTip(msg)
     SetTimer(() => ToolTip(), -durationMs)
+}
+
+; ------------------------------------------------------------------------------
+; Преобразование комбинации клавиш в читаемый вид
+; ------------------------------------------------------------------------------
+
+GetReadableHotkey(hk) {
+    if (hk == "")
+        return "Не назначена"
+    res := hk
+    res := StrReplace(res, "^", "Ctrl + ")
+    res := StrReplace(res, "+", "Shift + ")
+    res := StrReplace(res, "!", "Alt + ")
+    res := StrReplace(res, "#", "Win + ")
+    return res
 }
 
 ; ------------------------------------------------------------------------------
@@ -234,13 +287,21 @@ InitTrayMenu() {
             speedMenu.Check(opt.label)
     }
 
+    UpdateTrayMenuAndTip()
+}
+
+UpdateTrayMenuAndTip() {
+    global currentModel, modelLabels, currentHotkey, voiceMenu, speedMenu, modelsDir
+
     tray := A_TrayMenu
     tray.Delete()
 
     tray.Add("Piper TTS — Готов к работе", (*) => {})
     tray.Disable("Piper TTS — Готов к работе")
-    tray.Add("Горячая клавиша: Ctrl+Shift+Space", (*) => {})
-    tray.Disable("Горячая клавиша: Ctrl+Shift+Space")
+
+    readableHk := GetReadableHotkey(currentHotkey)
+    tray.Add("Горячая клавиша: " readableHk, (*) => ShowHotkeyDialog())
+    tray.Add("Настроить горячую клавишу...", (*) => ShowHotkeyDialog())
     tray.Add()
 
     tray.Add("Выбор голоса", voiceMenu)
@@ -255,34 +316,29 @@ InitTrayMenu() {
     tray.Add("Остановить речь", (*) => StopPlayback())
     tray.Add("Выход", (*) => ExitApp())
 
-    UpdateTrayTip()
-}
-
-UpdateTrayTip() {
-    global currentModel, modelLabels
     activeLabel := modelLabels.Has(currentModel) ? modelLabels[currentModel] : currentModel
-    A_IconTip := "Piper TTS`nГолос: " activeLabel "`nCtrl+Shift+Space — Старт / Стоп"
+    A_IconTip := "Piper TTS`nГолос: " activeLabel "`nКлавиша: " readableHk " (Старт/Стоп)"
 }
 
+; Вызов меню смены голоса
 MenuSelectVoice(selectedModel, itemName, itemPos, myMenu) {
-    global currentModel, voiceMenu, modelLabels
+    global currentModel, voiceMenu, modelLabels, configFile
 
-    ; Снимаем галочки со всех голосов
     for model, label in modelLabels {
         try voiceMenu.Uncheck(label)
     }
-
-    ; Ставим галочку на выбранную модель
     if modelLabels.Has(selectedModel)
         try voiceMenu.Check(modelLabels[selectedModel])
 
     currentModel := selectedModel
-    UpdateTrayTip()
+    IniWrite(currentModel, configFile, "Settings", "Model")
+    UpdateTrayMenuAndTip()
     ShowTempTooltip("Выбран голос: " itemName, 1500)
 }
 
+; Вызов меню смены скорости
 MenuSelectSpeed(speedVal, itemName, itemPos, myMenu) {
-    global currentSpeed, speedMenu, speedOptions
+    global currentSpeed, speedMenu, speedOptions, configFile
 
     for opt in speedOptions {
         try speedMenu.Uncheck(opt.label)
@@ -290,7 +346,82 @@ MenuSelectSpeed(speedVal, itemName, itemPos, myMenu) {
     try speedMenu.Check(itemName)
 
     currentSpeed := speedVal
+    IniWrite(currentSpeed, configFile, "Settings", "Speed")
     ShowTempTooltip("Установлена скорость: " itemName, 1500)
+}
+
+; ------------------------------------------------------------------------------
+; Графическое окно выбора горячей клавиши
+; ------------------------------------------------------------------------------
+
+ShowHotkeyDialog() {
+    global currentHotkey, hotkeyGuiObj
+
+    if (hotkeyGuiObj != "" && WinExist("ahk_id " hotkeyGuiObj.Hwnd)) {
+        hotkeyGuiObj.Show()
+        return
+    }
+
+    myGui := Gui("+AlwaysOnTop -MinimizeBox", "Настройка горячей клавиши — Piper TTS")
+    myGui.SetFont("s10", "Segoe UI")
+
+    myGui.Add("Text", "w340", "Текущая комбинация клавиш:")
+    myGui.SetFont("s11 bold")
+    txtCurrent := myGui.Add("Text", "w340 c0055AA", GetReadableHotkey(currentHotkey))
+    myGui.SetFont("s10 norm")
+
+    myGui.Add("Text", "w340 y+12", "Нажмите новую комбинацию в поле:")
+    hkInput := myGui.Add("Hotkey", "w340", currentHotkey)
+
+    myGui.Add("Text", "w340 y+12", "Или выберите быстрый пресет:")
+    presets := [
+        "Ctrl + Shift + Space",
+        "Ctrl + Alt + Space",
+        "Ctrl + Shift + S",
+        "Alt + Shift + S",
+        "Ctrl + Space",
+        "F9",
+        "F8"
+    ]
+    presetMap := Map(
+        "Ctrl + Shift + Space", "^+Space",
+        "Ctrl + Alt + Space",   "^!Space",
+        "Ctrl + Shift + S",     "^+s",
+        "Alt + Shift + S",       "!+s",
+        "Ctrl + Space",         "^Space",
+        "F9",                   "F9",
+        "F8",                   "F8"
+    )
+    ddl := myGui.Add("DropDownList", "w340", presets)
+    ddl.OnEvent("Change", (ctrl, *) => (presetMap.Has(ctrl.Text) ? hkInput.Value := presetMap[ctrl.Text] : 0))
+
+    btnSave := myGui.Add("Button", "y+18 w100 Default", "Сохранить")
+    btnReset := myGui.Add("Button", "x+10 w110", "По умолчанию")
+    btnCancel := myGui.Add("Button", "x+10 w100", "Отмена")
+
+    btnSave.OnEvent("Click", (*) => OnSaveHotkeyClick(hkInput.Value, myGui))
+    btnReset.OnEvent("Click", (*) => (hkInput.Value := "^+Space"))
+    btnCancel.OnEvent("Click", (*) => myGui.Destroy())
+
+    hotkeyGuiObj := myGui
+    myGui.Show("w370")
+}
+
+OnSaveHotkeyClick(newHk, guiObj) {
+    newHk := Trim(newHk)
+    if (newHk == "") {
+        MsgBox("Пожалуйста, нажмите или выберите комбинацию клавиш.", "Piper TTS", "Icon!")
+        return
+    }
+
+    try {
+        ApplyHotkey(newHk)
+        readable := GetReadableHotkey(newHk)
+        guiObj.Destroy()
+        ShowTempTooltip("Горячая клавиша сохранена: " readable, 2000)
+    } catch as err {
+        MsgBox("Не удалось назначить эту комбинацию клавиш:`n" err.Message "`n`nВозможно, она зарезервирована системой или другой программой.", "Ошибка горячей клавиши", "Icon!")
+    }
 }
 
 ; ------------------------------------------------------------------------------
@@ -319,3 +450,6 @@ ToggleStartup(*) {
         ShowTempTooltip("Piper TTS добавлен в автозагрузку Windows!", 1500)
     }
 }
+
+; Запуск меню при старте
+InitTrayMenu()

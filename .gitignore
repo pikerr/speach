@@ -11,6 +11,9 @@ output.wav
 __pycache__/
 *.py[cod]
 
+# User local settings
+config.ini
+
 # IDE and OS files
 .vscode/
 .idea/
