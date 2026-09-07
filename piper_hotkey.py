@@ -68,9 +68,7 @@ def stop_playback():
 
 if __name__ == "__main__":
     print("Piper TTS (Python) запущен.")
-    print("Горячие клавиши: Ctrl+Shift+Space или Ctrl+Alt+Space (Озвучить), Ctrl+Shift+Esc (Стоп)")
+    print("Горячая клавиша: Ctrl+Shift+Space (Озвучить / Стоп)")
     keyboard.add_hotkey("ctrl+shift+space", speak_selected)
-    keyboard.add_hotkey("ctrl+alt+space", speak_selected)
     keyboard.add_hotkey("ctrl+shift+esc", stop_playback)
-    keyboard.add_hotkey("ctrl+alt+esc", stop_playback)
     keyboard.wait()

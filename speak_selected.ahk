@@ -4,8 +4,8 @@ Persistent
 
 ; ==============================================================================
 ; Piper TTS - Озвучивание выделенного текста по горячим клавишам для Windows
-; Горячая клавиша: Ctrl + Shift + Space  (Озвучить)
-; Остановить:      Ctrl + Shift + Esc    или клавиша Pause
+; Горячая клавиша: Ctrl + Shift + Space  (Старт / Стоп)
+; Экстренный стоп: Ctrl + Shift + Esc    или клавиша Pause
 ; ==============================================================================
 
 appDir := A_ScriptDir
@@ -20,12 +20,22 @@ tempTxt := tempDir "\input.txt"
 tempWav := tempDir "\output.wav"
 
 ; Настройки по умолчанию
-global currentSpeed := 1.0        ; 1.0 = обычная скорость (меньше = быстрее)
+global currentSpeed := 1.0
 global currentModel := "ru_RU-dmitri-medium.onnx"
-global isPlaying := false
 
-; Проверяем наличие моделей и выбираем первую доступную, если дефолтная не найдена
-availableModels := []
+; Список найденных моделей
+global availableModels := []
+global modelLabels := Map()
+global speedOptions := [
+    { label: "1.4x (Очень быстро)", val: 0.70 },
+    { label: "1.2x (Быстро)",       val: 0.85 },
+    { label: "1.0x (Нормально)",    val: 1.00 },
+    { label: "0.85x (Медленнее)",   val: 1.18 }
+]
+
+global voiceMenu := Menu()
+global speedMenu := Menu()
+
 loop files modelsDir "\*.onnx" {
     availableModels.Push(A_LoopFileName)
 }
@@ -48,32 +58,29 @@ if (availableModels.Length > 0) {
 }
 
 ; Инициализация меню в трее
-SetupTrayMenu()
+InitTrayMenu()
 
-; Предотвращаем срабатывание переключения раскладки клавиатуры (Ctrl+Shift / Alt+Shift) в Windows
+; Предотвращаем срабатывание переключения раскладки клавиатуры (Ctrl+Shift) в Windows
 A_MenuMaskKey := "vkE8"
 
 MaskLayoutSwitch() {
-    ; Посылаем фиктивный код клавиши 0xE8, чтобы Windows сбросила состояние ожидания переключения языка
     DllCall("keybd_event", "uchar", 0xE8, "uchar", 0, "uint", 0, "uptr", 0)
     DllCall("keybd_event", "uchar", 0xE8, "uchar", 0, "uint", 2, "uptr", 0)
 }
 
 ; ------------------------------------------------------------------------------
-; Горячие клавиши (Toggle: Озвучить / Остановить)
+; Горячая клавиша: Ctrl + Shift + Space (Старт / Стоп)
 ; ------------------------------------------------------------------------------
 
-; Ctrl + Shift + Space (или Ctrl + Alt + Space) — Озвучить / Остановить
 ^+Space::
-^!Space::
 {
-    ; Сразу сбрасываем триггер смены языка Windows
+    ; Сбрасываем триггер смены языка Windows
     MaskLayoutSwitch()
 
     ; Если в данный момент уже воспроизводится звук — останавливаем его и выходим
     if IsAudioPlaying() {
         StopPlayback()
-        ShowTempTooltip("⏹ Остановлено", 1000)
+        ShowTempTooltip("⏹ Воспроизведение остановлено", 1000)
         return
     }
 
@@ -108,13 +115,12 @@ MaskLayoutSwitch() {
     SpeakText(selectedText)
 }
 
-; Дополнительные клавиши остановки (Ctrl+Shift+Esc, Ctrl+Alt+Esc, Pause)
+; Экстренная остановка
 ^+Esc::StopPlayback()
-^!Esc::StopPlayback()
 Pause::StopPlayback()
 
 ; ------------------------------------------------------------------------------
-; Функции синтеза и управления звуком (MCI)
+; Функции синтеза и воспроизведения звука (MCI)
 ; ------------------------------------------------------------------------------
 
 IsAudioPlaying() {
@@ -128,7 +134,7 @@ StopPlayback() {
     DllCall("winmm\mciSendStringW", "wstr", "stop piperAudio", "ptr", 0, "uint", 0, "ptr", 0)
     DllCall("winmm\mciSendStringW", "wstr", "close piperAudio", "ptr", 0, "uint", 0, "ptr", 0)
     DllCall("winmm\PlaySoundW", "ptr", 0, "ptr", 0, "uint", 0)
-    ToolTip() ; скрыть подсказку
+    ToolTip()
 }
 
 PlayWav(wavPath) {
@@ -141,14 +147,24 @@ SpeakText(text) {
     global piperExe, modelsDir, currentModel, currentSpeed, tempTxt, tempWav
 
     modelPath := modelsDir "\" currentModel
+    configPath := modelPath ".json"
+
     if !FileExist(modelPath) {
-        MsgBox("Модель голоса не найдена: `n" modelPath, "Ошибка Piper TTS", "Icon!")
+        MsgBox("Модель голоса не найдена:`n" modelPath, "Ошибка Piper TTS", "Icon!")
         return
     }
 
     if !FileExist(piperExe) {
-        MsgBox("Файл piper.exe не найден по пути: `n" piperExe, "Ошибка Piper TTS", "Icon!")
+        MsgBox("Файл piper.exe не найден по пути:`n" piperExe, "Ошибка Piper TTS", "Icon!")
         return
+    }
+
+    ; Перед синтезом обязательно освобождаем аудиофайл
+    StopPlayback()
+
+    ; Удаляем старый файл wav, чтобы гарантировать генерацию нового
+    if FileExist(tempWav) {
+        try FileDelete(tempWav)
     }
 
     ; Записываем текст во временный файл в кодировке UTF-8
@@ -165,20 +181,20 @@ SpeakText(text) {
 
     ShowTempTooltip("⏳ Генерация речи...", 5000)
 
-    ; Формируем команду вызова piper.exe через cmd с перенаправлением stdin
-    cmd := A_ComSpec ' /c chcp 65001 >nul && "' piperExe '" -m "' modelPath '" --length_scale ' currentSpeed ' -f "' tempWav '" < "' tempTxt '"'
+    ; Формируем команду вызова piper.exe с явным указанием модели и конфига
+    cmd := A_ComSpec ' /c chcp 65001 >nul && "' piperExe '" -m "' modelPath '" -c "' configPath '" --length_scale ' currentSpeed ' -f "' tempWav '" < "' tempTxt '"'
 
     ; Выполняем синтез без появления черного окна консоли (Hide)
     exitCode := RunWait(cmd,, "Hide")
 
-    if (exitCode != 0 || !FileExist(tempWav)) {
+    if (exitCode != 0 || !FileExist(tempWav) || FileGetSize(tempWav) = 0) {
         ShowTempTooltip("Ошибка генерации звука Piper!", 2500)
         return
     }
 
     ; Запуск воспроизведения через MCI
     PlayWav(tempWav)
-    ShowTempTooltip("🔊 Озвучивание... (Нажмите ещё раз для остановки)", 3000)
+    ShowTempTooltip("🔊 Озвучивание... (Ctrl+Shift+Space — стоп)", 3000)
 }
 
 ShowTempTooltip(msg, durationMs := 1500) {
@@ -190,79 +206,90 @@ ShowTempTooltip(msg, durationMs := 1500) {
 ; Настройка меню в системном трее
 ; ------------------------------------------------------------------------------
 
-SetupTrayMenu() {
-    global availableModels, currentModel, currentSpeed
+InitTrayMenu() {
+    global availableModels, currentModel, currentSpeed, voiceMenu, speedMenu, modelLabels, speedOptions
 
-    tray := A_TrayMenu
-    tray.Delete() ; Очищаем стандартное меню
-
-    tray.Add("Piper TTS — Готов к работе", (*) => {})
-    tray.Disable("Piper TTS — Готов к работе")
-    tray.Add("Клавиши: Ctrl+Shift+Space / Ctrl+Alt+Space", (*) => {})
-    tray.Disable("Клавиши: Ctrl+Shift+Space / Ctrl+Alt+Space")
-    tray.Add() ; Разделитель
-
-    ; Подменю голосов
-    voiceMenu := Menu()
+    ; Заполняем подменю голосов
     for model in availableModels {
-        modelName := model
-        ; Создаем понятную метку для пунктов меню
-        label := modelName
-        if InStr(modelName, "dmitri")
+        label := model
+        if InStr(model, "dmitri")
             label := "Дмитрий (dmitri) [RU]"
-        else if InStr(modelName, "irina")
+        else if InStr(model, "irina")
             label := "Ирина (irina) [RU]"
-        else if InStr(modelName, "ruslan")
+        else if InStr(model, "ruslan")
             label := "Руслан (ruslan) [RU]"
-        else if InStr(modelName, "denis")
+        else if InStr(model, "denis")
             label := "Денис (denis) [RU]"
         
-        voiceMenu.Add(label, MenuSelectVoice.Bind(modelName))
-        if (modelName = currentModel)
+        modelLabels[model] := label
+        voiceMenu.Add(label, MenuSelectVoice.Bind(model))
+        if (model = currentModel)
             voiceMenu.Check(label)
     }
-    tray.Add("Выбор голоса", voiceMenu)
 
-    ; Подменю скорости
-    speedMenu := Menu()
-    speedOptions := [
-        { label: "1.4x (Очень быстро)", val: 0.70 },
-        { label: "1.2x (Быстро)",       val: 0.85 },
-        { label: "1.0x (Нормально)",    val: 1.00 },
-        { label: "0.85x (Медленнее)",   val: 1.18 }
-    ]
+    ; Заполняем подменю скорости
     for opt in speedOptions {
         speedMenu.Add(opt.label, MenuSelectSpeed.Bind(opt.val))
         if (opt.val = currentSpeed)
             speedMenu.Check(opt.label)
     }
-    tray.Add("Скорость речи", speedMenu)
 
-    tray.Add() ; Разделитель
+    tray := A_TrayMenu
+    tray.Delete()
+
+    tray.Add("Piper TTS — Готов к работе", (*) => {})
+    tray.Disable("Piper TTS — Готов к работе")
+    tray.Add("Горячая клавиша: Ctrl+Shift+Space", (*) => {})
+    tray.Disable("Горячая клавиша: Ctrl+Shift+Space")
+    tray.Add()
+
+    tray.Add("Выбор голоса", voiceMenu)
+    tray.Add("Скорость речи", speedMenu)
+    tray.Add()
+
     tray.Add("Папка с моделями", (*) => Run(modelsDir))
     tray.Add("Добавить в автозагрузку Windows", ToggleStartup)
-    
-    ; Обновляем статус автозагрузки
     if IsInStartup()
         tray.Check("Добавить в автозагрузку Windows")
 
     tray.Add("Остановить речь", (*) => StopPlayback())
     tray.Add("Выход", (*) => ExitApp())
 
-    A_IconTip := "Piper TTS`nCtrl+Shift+Space — Озвучить / Остановить`nCtrl+Alt+Space — Альтернатива"
+    UpdateTrayTip()
 }
 
-MenuSelectVoice(modelName, itemName, itemPos, myMenu) {
-    global currentModel
-    currentModel := modelName
-    SetupTrayMenu()
+UpdateTrayTip() {
+    global currentModel, modelLabels
+    activeLabel := modelLabels.Has(currentModel) ? modelLabels[currentModel] : currentModel
+    A_IconTip := "Piper TTS`nГолос: " activeLabel "`nCtrl+Shift+Space — Старт / Стоп"
+}
+
+MenuSelectVoice(selectedModel, itemName, itemPos, myMenu) {
+    global currentModel, voiceMenu, modelLabels
+
+    ; Снимаем галочки со всех голосов
+    for model, label in modelLabels {
+        try voiceMenu.Uncheck(label)
+    }
+
+    ; Ставим галочку на выбранную модель
+    if modelLabels.Has(selectedModel)
+        try voiceMenu.Check(modelLabels[selectedModel])
+
+    currentModel := selectedModel
+    UpdateTrayTip()
     ShowTempTooltip("Выбран голос: " itemName, 1500)
 }
 
 MenuSelectSpeed(speedVal, itemName, itemPos, myMenu) {
-    global currentSpeed
+    global currentSpeed, speedMenu, speedOptions
+
+    for opt in speedOptions {
+        try speedMenu.Uncheck(opt.label)
+    }
+    try speedMenu.Check(itemName)
+
     currentSpeed := speedVal
-    SetupTrayMenu()
     ShowTempTooltip("Установлена скорость: " itemName, 1500)
 }
 
@@ -280,13 +307,15 @@ IsInStartup() {
 
 ToggleStartup(*) {
     shortcut := GetStartupShortcutPath()
+    tray := A_TrayMenu
     if FileExist(shortcut) {
         FileDelete(shortcut)
+        tray.Uncheck("Добавить в автозагрузку Windows")
         ShowTempTooltip("Piper TTS удален из автозагрузки", 1500)
     } else {
         vbsLauncher := A_ScriptDir "\start_piper.vbs"
         FileCreateShortcut(vbsLauncher, shortcut, A_ScriptDir,, "Piper TTS hotkey speaker", A_ScriptDir "\piper\piper.exe")
+        tray.Check("Добавить в автозагрузку Windows")
         ShowTempTooltip("Piper TTS добавлен в автозагрузку Windows!", 1500)
     }
-    SetupTrayMenu()
 }
