@@ -110,3 +110,16 @@ piper_tts/
    ```cmd
    pythonw piper_hotkey.py
    ```
+
+---
+
+## 📄 Лицензия
+
+Этот проект распространяется под лицензией **GNU General Public License v3.0 (GPL-3.0)**. Подробнее см. в файле [LICENSE](file:///d:/work/lab/piper_tts/LICENSE).
+
+Используемые сторонние компоненты:
+* **Piper TTS** — MIT License (© Michael Hansen)
+* **ONNX Runtime** — MIT License (© Microsoft Corporation)
+* **AutoHotkey v2** — GNU GPL v2.0 (© AutoHotkey Team)
+* **eSpeak NG** — GNU GPL v3.0 (© eSpeak NG authors)
+

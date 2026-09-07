@@ -93,6 +93,7 @@ Source: "start_piper.bat"; DestDir: "{app}"; Flags: ignoreversion; Components: c
 Source: "stop_piper.bat"; DestDir: "{app}"; Flags: ignoreversion; Components: core
 Source: "download_voice.ps1"; DestDir: "{app}"; Flags: ignoreversion; Components: core
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion; Components: core
+Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion; Components: core
 Source: "models\.gitkeep"; DestDir: "{app}\models"; Flags: ignoreversion; Components: core
 
 ; --- Сетевая загрузка голосовых моделей (HuggingFace) ---
