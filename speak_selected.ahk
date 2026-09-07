@@ -354,16 +354,32 @@ MenuSelectSpeed(speedVal, itemName, itemPos, myMenu) {
 ; Графическое окно выбора горячей клавиши
 ; ------------------------------------------------------------------------------
 
+CloseHotkeyGui(*) {
+    global hotkeyGuiObj
+    if (hotkeyGuiObj != "") {
+        try hotkeyGuiObj.Destroy()
+        hotkeyGuiObj := ""
+    }
+}
+
 ShowHotkeyDialog() {
     global currentHotkey, hotkeyGuiObj
 
-    if (hotkeyGuiObj != "" && WinExist("ahk_id " hotkeyGuiObj.Hwnd)) {
-        hotkeyGuiObj.Show()
-        return
+    if (hotkeyGuiObj != "") {
+        try {
+            if WinExist(hotkeyGuiObj) {
+                hotkeyGuiObj.Show()
+                return
+            }
+        }
+        hotkeyGuiObj := ""
     }
 
     myGui := Gui("+AlwaysOnTop -MinimizeBox", "Настройка горячей клавиши — Piper TTS")
     myGui.SetFont("s10", "Segoe UI")
+
+    myGui.OnEvent("Close", CloseHotkeyGui)
+    myGui.OnEvent("Escape", CloseHotkeyGui)
 
     myGui.Add("Text", "w340", "Текущая комбинация клавиш:")
     myGui.SetFont("s11 bold")
@@ -399,15 +415,15 @@ ShowHotkeyDialog() {
     btnReset := myGui.Add("Button", "x+10 w110", "По умолчанию")
     btnCancel := myGui.Add("Button", "x+10 w100", "Отмена")
 
-    btnSave.OnEvent("Click", (*) => OnSaveHotkeyClick(hkInput.Value, myGui))
+    btnSave.OnEvent("Click", (*) => OnSaveHotkeyClick(hkInput.Value))
     btnReset.OnEvent("Click", (*) => (hkInput.Value := "^+Space"))
-    btnCancel.OnEvent("Click", (*) => myGui.Destroy())
+    btnCancel.OnEvent("Click", CloseHotkeyGui)
 
     hotkeyGuiObj := myGui
     myGui.Show("w370")
 }
 
-OnSaveHotkeyClick(newHk, guiObj) {
+OnSaveHotkeyClick(newHk) {
     newHk := Trim(newHk)
     if (newHk == "") {
         MsgBox("Пожалуйста, нажмите или выберите комбинацию клавиш.", "Piper TTS", "Icon!")
@@ -417,7 +433,7 @@ OnSaveHotkeyClick(newHk, guiObj) {
     try {
         ApplyHotkey(newHk)
         readable := GetReadableHotkey(newHk)
-        guiObj.Destroy()
+        CloseHotkeyGui()
         ShowTempTooltip("Горячая клавиша сохранена: " readable, 2000)
     } catch as err {
         MsgBox("Не удалось назначить эту комбинацию клавиш:`n" err.Message "`n`nВозможно, она зарезервирована системой или другой программой.", "Ошибка горячей клавиши", "Icon!")
