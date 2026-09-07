@@ -93,7 +93,6 @@ Source: "start_piper.bat"; DestDir: "{app}"; Flags: ignoreversion; Components: c
 Source: "stop_piper.bat"; DestDir: "{app}"; Flags: ignoreversion; Components: core
 Source: "download_voice.ps1"; DestDir: "{app}"; Flags: ignoreversion; Components: core
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion; Components: core
-Source: "config.ini"; DestDir: "{app}"; Flags: onlyifdoesntexist; Components: core
 Source: "models\.gitkeep"; DestDir: "{app}\models"; Flags: ignoreversion; Components: core
 
 ; --- Сетевая загрузка голосовых моделей (HuggingFace) ---
@@ -132,6 +131,11 @@ Source: "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/
   DestName: "en_US-ryan-medium.onnx"; DestDir: "{app}\models"; ExternalSize: 63201294; Flags: external download ignoreversion; Components: voices\ryan
 Source: "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx.json"; \
   DestName: "en_US-ryan-medium.onnx.json"; DestDir: "{app}\models"; ExternalSize: 4800; Flags: external download ignoreversion; Components: voices\ryan
+
+[INI]
+Filename: "{app}\config.ini"; Section: "Settings"; Key: "Hotkey"; String: "^+Space"; Flags: createkeyifdoesntexist
+Filename: "{app}\config.ini"; Section: "Settings"; Key: "Model"; String: "ru_RU-dmitri-medium.onnx"; Flags: createkeyifdoesntexist
+Filename: "{app}\config.ini"; Section: "Settings"; Key: "Speed"; String: "1.0"; Flags: createkeyifdoesntexist
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\ahk\AutoHotkey64.exe"
