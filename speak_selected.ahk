@@ -247,12 +247,51 @@ ShowTempTooltip(msg, durationMs := 1500) {
 GetReadableHotkey(hk) {
     if (hk == "")
         return "Не назначена"
-    res := hk
-    res := StrReplace(res, "^", "Ctrl + ")
-    res := StrReplace(res, "+", "Shift + ")
-    res := StrReplace(res, "!", "Alt + ")
-    res := StrReplace(res, "#", "Win + ")
-    return res
+
+    parts := []
+    cleanHk := hk
+
+    hasCtrl := false
+    hasShift := false
+    hasAlt := false
+    hasWin := false
+
+    loop {
+        ch := SubStr(cleanHk, 1, 1)
+        if (ch = "^") {
+            hasCtrl := true
+            cleanHk := SubStr(cleanHk, 2)
+        } else if (ch = "+") {
+            hasShift := true
+            cleanHk := SubStr(cleanHk, 2)
+        } else if (ch = "!") {
+            hasAlt := true
+            cleanHk := SubStr(cleanHk, 2)
+        } else if (ch = "#") {
+            hasWin := true
+            cleanHk := SubStr(cleanHk, 2)
+        } else {
+            break
+        }
+    }
+
+    if hasCtrl
+        parts.Push("Ctrl")
+    if hasAlt
+        parts.Push("Alt")
+    if hasShift
+        parts.Push("Shift")
+    if hasWin
+        parts.Push("Win")
+
+    if (cleanHk != "")
+        parts.Push(cleanHk)
+
+    result := ""
+    for idx, part in parts {
+        result .= (idx > 1 ? " + " : "") . part
+    }
+    return result
 }
 
 ; ------------------------------------------------------------------------------
