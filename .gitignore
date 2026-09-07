@@ -1,0 +1,18 @@
+# Piper voice models (.onnx are large binaries, downloaded via download_voice.ps1)
+models/*.onnx
+
+# Temporary audio and text files
+*.wav
+*.tmp
+input.txt
+output.wav
+
+# Python
+__pycache__/
+*.py[cod]
+
+# IDE and OS files
+.vscode/
+.idea/
+Thumbs.db
+[Dd]esktop.ini
