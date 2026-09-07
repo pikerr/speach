@@ -19,3 +19,8 @@ config.ini
 .idea/
 Thumbs.db
 [Dd]esktop.ini
+
+# Installer build outputs
+dist/
+Output/
+
